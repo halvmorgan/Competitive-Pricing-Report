@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { X, Copy, Check, Share2, Shield, Key } from 'lucide-react';
+import { X, Copy, Check, Share2, Shield } from 'lucide-react';
 
 interface ShareModalProps {
   isOpen: boolean;
@@ -9,23 +9,15 @@ interface ShareModalProps {
 
 export const ShareModal: React.FC<ShareModalProps> = ({ isOpen, onClose, currentUserEmail }) => {
   const [copiedLink, setCopiedLink] = useState(false);
-  const [copiedKey, setCopiedKey] = useState(false);
 
   if (!isOpen) return null;
 
-  const defaultPass = 'PRO-COMPETE-2026';
-  const shareUrl = `${window.location.origin}/?access_key=${encodeURIComponent(defaultPass)}`;
+  const shareUrl = window.location.origin;
 
   const handleCopyLink = () => {
     navigator.clipboard.writeText(shareUrl);
     setCopiedLink(true);
     setTimeout(() => setCopiedLink(false), 2000);
-  };
-
-  const handleCopyKey = () => {
-    navigator.clipboard.writeText(defaultPass);
-    setCopiedKey(true);
-    setTimeout(() => setCopiedKey(false), 2000);
   };
 
   return (
@@ -48,7 +40,7 @@ export const ShareModal: React.FC<ShareModalProps> = ({ isOpen, onClose, current
               Share Access with Team
             </h3>
             <p className="text-xs text-slate-400">
-              Grant colleagues or clients instant access to this intelligence flipbook.
+              Send a teammate the link. Give them the passcode separately (by phone or text).
             </p>
           </div>
         </div>
@@ -56,7 +48,7 @@ export const ShareModal: React.FC<ShareModalProps> = ({ isOpen, onClose, current
         <div className="space-y-4 my-5">
           <div>
             <label className="block text-xs font-medium text-slate-300 mb-1.5">
-              1-Click Direct Access URL
+              App Link
             </label>
             <div className="flex items-center gap-2">
               <input
@@ -74,33 +66,16 @@ export const ShareModal: React.FC<ShareModalProps> = ({ isOpen, onClose, current
               </button>
             </div>
             <p className="text-[11px] text-slate-500 mt-1">
-              Recipients will be automatically authenticated without having to type a passcode.
+              They will be asked for the passcode when they open it.
             </p>
           </div>
 
-          <div>
-            <label className="block text-xs font-medium text-slate-300 mb-1.5">
-              Team Passcode
-            </label>
-            <div className="flex items-center justify-between px-3 py-2 bg-slate-950/80 border border-slate-700/80 rounded-lg">
-              <span className="font-mono text-sm text-amber-300 tracking-wider">
-                {defaultPass}
-              </span>
-              <button
-                onClick={handleCopyKey}
-                className="text-xs text-slate-400 hover:text-slate-200 flex items-center gap-1"
-              >
-                {copiedKey ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
-                <span>{copiedKey ? 'Copied' : 'Copy'}</span>
-              </button>
-            </div>
-          </div>
         </div>
 
         <div className="p-3 bg-slate-950/50 border border-slate-800 rounded-lg text-[11px] text-slate-400 flex items-start gap-2">
           <Shield className="w-4 h-4 text-amber-500/80 shrink-0 mt-0.5" />
           <span>
-            Only people who receive your link or passcode can query Gemini and view competitor pricing on your Cloud Run deployment.
+            Only people with the passcode can run searches. To change the passcode, update the APP_ACCESS_PASSCODE secret in AI Studio.
           </span>
         </div>
 

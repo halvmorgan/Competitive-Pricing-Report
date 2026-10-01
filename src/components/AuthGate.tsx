@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Lock, Key, ArrowRight, ShieldCheck, CheckCircle2 } from 'lucide-react';
+import { Lock, Key, ArrowRight } from 'lucide-react';
 import { AuthSession } from '../types.ts';
 
 interface AuthGateProps {
@@ -46,11 +46,6 @@ export const AuthGate: React.FC<AuthGateProps> = ({ onAuthenticated }) => {
     }
   };
 
-  const handleQuickOwnerAccess = () => {
-    setEmail('halvmorgan@gmail.com');
-    setAccessPass('PRO-COMPETE-2026');
-  };
-
   return (
     <div className="min-h-screen bg-gradient-to-b from-slate-950 via-slate-900 to-slate-950 text-slate-100 flex flex-col justify-center items-center px-4 py-12 relative overflow-hidden">
       {/* Subtle background glow */}
@@ -65,7 +60,7 @@ export const AuthGate: React.FC<AuthGateProps> = ({ onAuthenticated }) => {
             Competitive Pricing Analysis
           </h1>
           <p className="text-xs text-slate-400 mt-2">
-            Restricted Market Intelligence Portal · Authorized Access Only
+            Private team tool · Ecentra Concierge
           </p>
         </div>
 
@@ -79,13 +74,13 @@ export const AuthGate: React.FC<AuthGateProps> = ({ onAuthenticated }) => {
         <form onSubmit={handleVerify} className="space-y-4">
           <div>
             <label className="block text-xs font-medium text-slate-300 mb-1.5">
-              Authorized Email
+              Your name or email (optional)
             </label>
             <input
-              type="email"
+              type="text"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              placeholder="e.g. halvmorgan@gmail.com"
+              placeholder="So we know who ran the search"
               className="w-full px-3.5 py-2.5 bg-slate-950/60 border border-slate-700 rounded-lg text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-amber-500/50 focus:border-amber-500 transition-all"
             />
           </div>
@@ -93,16 +88,16 @@ export const AuthGate: React.FC<AuthGateProps> = ({ onAuthenticated }) => {
           <div>
             <div className="flex items-center justify-between mb-1.5">
               <label className="block text-xs font-medium text-slate-300">
-                Team Access Passcode
+                Access Passcode
               </label>
-              <span className="text-[11px] text-slate-500">Shared by Morgan</span>
             </div>
             <div className="relative">
               <input
-                type="text"
+                type="password"
+                autoComplete="current-password"
                 value={accessPass}
                 onChange={(e) => setAccessPass(e.target.value)}
-                placeholder="e.g. PRO-COMPETE-2026"
+                placeholder="Enter your passcode"
                 className="w-full pl-9 pr-3.5 py-2.5 bg-slate-950/60 border border-slate-700 rounded-lg text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-amber-500/50 focus:border-amber-500 font-mono transition-all"
               />
               <Key className="w-4 h-4 text-slate-500 absolute left-3 top-3" />
@@ -125,22 +120,9 @@ export const AuthGate: React.FC<AuthGateProps> = ({ onAuthenticated }) => {
           </button>
         </form>
 
-        <div className="mt-8 pt-6 border-t border-slate-800/80">
-          <div className="flex items-center justify-between text-xs">
-            <span className="text-slate-400">App Owner / Lead:</span>
-            <button
-              type="button"
-              onClick={handleQuickOwnerAccess}
-              className="text-amber-400 hover:text-amber-300 underline underline-offset-2 flex items-center gap-1 font-medium"
-            >
-              <span>halvmorgan@gmail.com</span>
-              <CheckCircle2 className="w-3.5 h-3.5" />
-            </button>
-          </div>
-          <p className="text-[11px] text-slate-500 mt-2 text-center">
-            Click above to pre-fill owner credentials or use the team pass provided to your team.
-          </p>
-        </div>
+        <p className="mt-8 pt-6 border-t border-slate-800/80 text-[11px] text-slate-500 text-center">
+          Need access? Contact Ecentra Concierge for a passcode.
+        </p>
       </div>
     </div>
   );

@@ -17,9 +17,6 @@ import {
   AlertCircle,
   HelpCircle,
   Calendar,
-  Copy,
-  Check,
-  Download,
 } from 'lucide-react';
 import { CompetitorSearchResult, CompetitorBusiness, PublishedOffer } from '../types.ts';
 
@@ -38,108 +35,6 @@ function formatCheckedDate(dateStr?: string): string {
   }
 }
 
-// ---------- Report export helpers (email summary + printable PDF) ----------
-function escapeHtml(v: unknown): string {
-  return String(v ?? '')
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
-}
-
-function offerLine(o: PublishedOffer): string {
-  const title = String(o.title || '').trim();
-  const price = String(o.price || '').trim();
-  const amount = (price.match(/\$\s?[\d,]+(?:\.\d{1,2})?/) || [''])[0].replace(/\s/g, '');
-  const ev = String((o as any).evidence || '');
-  const isFrom = amount && new RegExp('(from|starts? at|starting at|start around|as low as)\\s*' + amount.replace(/[$.,]/g, (c) => '\\' + c), 'i').test(ev.replace(/\$\s/g, '$'));
-  const priceText = isFrom && !/off/i.test(price) ? 'from ' + price : price;
-  if (amount && title.replace(/\s/g, '').includes(amount)) return title;
-  return title ? title + ': ' + priceText : priceText;
-}
-
-export function buildEmailSummary(result: CompetitorSearchResult): string {
-  const priced = result.competitors.filter((c) => (c.offers || []).length > 0);
-  const lines = priced.slice(0, 4).map((c) => '• ' + c.name + ' – ' + offerLine(c.offers[0]));
-  if (lines.length === 0) {
-    return `I checked ${result.competitors.length} of your competitors near ${result.location}, and none of them post prices on their websites. That is an opening: the first one to show clear pricing usually gets the call.`;
-  }
-  return [
-    `I pulled what your competitors near ${result.location} are advertising right now:`,
-    ...lines,
-    `(${priced.length} of the ${result.competitors.length} competitors I checked post prices online.)`,
-    '',
-    `Want the full report with all ${result.competitors.length} and a link to each source? Just reply "report" and I'll send it over.`,
-  ].join('\n');
-}
-
-// One-line version for the Saleshandy "Competitor Prices" field (line breaks get lost in CSV fields)
-export function buildFieldText(result: CompetitorSearchResult): string {
-  const tidyName = (n: string) => (n === n.toUpperCase() ? n.toLowerCase().replace(/\b\w/g, (m) => m.toUpperCase()) : n);
-  const items = result.competitors
-    .filter((c) => (c.offers || []).length > 0)
-    .slice(0, 3)
-    .map((c) => {
-      const lines = c.offers.map((o) => offerLine(o).replace(/[()]/g, '').trim()).sort((a, b) => a.length - b.length);
-      let line = lines[0] || '';
-      if (line.length > 70) line = line.slice(0, 67).trim() + '...';
-      return tidyName(c.name) + ' (' + line + ')';
-    });
-  if (items.length === 0) return '';
-  if (items.length === 1) return items[0];
-  return items.slice(0, -1).join(', ') + ' and ' + items[items.length - 1];
-}
-
-export function printReport(result: CompetitorSearchResult): void {
-  const date = new Date(result.searchedAt || Date.now()).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
-  const priced = result.competitors.filter((c) => (c.offers || []).length > 0).length;
-  const rows = result.competitors
-    .map((c, i) => {
-      const offers = (c.offers || []).length
-        ? '<ul>' + c.offers.map((o) => '<li><b>' + escapeHtml(offerLine(o)) + '</b>' + (o.billingPeriod && !/as published|one-time/i.test(o.billingPeriod) && !/off/i.test(String(o.price)) ? ' <span class="muted">(' + escapeHtml(o.billingPeriod) + ')</span>' : '') + (o.sourceUrl ? ' <a href="' + escapeHtml(o.sourceUrl) + '">source</a>' : '') + '</li>').join('') + '</ul>'
-        : '<p class="muted">' + escapeHtml(c.noPricingReason || 'Price not published') + '</p>';
-      return '<section><h2>' + (i + 1) + '. ' + escapeHtml(c.name) + '</h2><p class="addr">' + escapeHtml(c.addressOrArea) + (c.approximateDistance ? ' · ' + escapeHtml(c.approximateDistance) : '') + (c.sourceUrl ? ' · <a href="' + escapeHtml(c.sourceUrl) + '">' + escapeHtml(c.sourceUrl.replace(/^https?:\/\//, '').replace(/\/$/, '').split('?')[0]) + '</a>' : '') + '</p>' + offers + '</section>';
-    })
-    .join('');
-  const title = 'Competitor Pricing Report – ' + result.industry + ' – ' + result.location;
-  const html = '<!doctype html><html><head><meta charset="utf-8"><title>' + escapeHtml(title) + '</title><style>' +
-    '@page{size:letter;margin:0.6in}body{font-family:Georgia,"Times New Roman",serif;color:#1c1917;font-size:11pt;line-height:1.45}' +
-    'header{border-bottom:3px solid #d97706;padding-bottom:10px;margin-bottom:16px}h1{font-size:20pt;margin:0 0 4px}' +
-    '.meta{font-family:Arial,sans-serif;font-size:9.5pt;color:#57534e}.kpi{font-family:Arial,sans-serif;background:#fffbeb;border:1px solid #fcd34d;border-radius:6px;padding:8px 12px;margin:12px 0 18px;font-size:10pt}' +
-    'section{break-inside:avoid;border-bottom:1px solid #e7e5e4;padding:8px 0 10px}h2{font-size:13pt;margin:0 0 2px}.addr{font-family:Arial,sans-serif;font-size:9pt;color:#57534e;margin:0 0 6px}' +
-    'ul{margin:0;padding-left:18px}li{margin:2px 0}.muted{color:#78716c;font-style:italic}a{color:#b45309}' +
-    'footer{margin-top:18px;font-family:Arial,sans-serif;font-size:8.5pt;color:#78716c}</style></head><body>' +
-    '<header><h1>Competitor Pricing Report</h1><div class="meta">' + escapeHtml(result.industry) + ' within about ' + escapeHtml(result.approximateRadiusMiles) + ' miles of ' + escapeHtml(result.location) + ' · Checked ' + escapeHtml(date) + '</div></header>' +
-    '<div class="kpi"><b>' + priced + ' of ' + result.competitors.length + '</b> nearby competitors publish prices or offers on their websites.</div>' +
-    rows +
-    '<footer>Prices and offers were collected from each business\'s own public website on ' + escapeHtml(date) + '. Confirm current pricing with the business. Prepared by Ecentra Concierge · ecentraconcierge.com</footer>' +
-    '</body></html>';
-
-  const frame = document.createElement('iframe');
-  frame.style.position = 'fixed';
-  frame.style.right = '0';
-  frame.style.bottom = '0';
-  frame.style.width = '0';
-  frame.style.height = '0';
-  frame.style.border = '0';
-  document.body.appendChild(frame);
-  const doc = frame.contentWindow?.document;
-  if (!doc) return;
-  doc.open();
-  doc.write(html);
-  doc.close();
-  const prevTitle = document.title;
-  document.title = title;
-  setTimeout(() => {
-    frame.contentWindow?.focus();
-    frame.contentWindow?.print();
-    setTimeout(() => {
-      document.title = prevTitle;
-      frame.remove();
-    }, 1500);
-  }, 300);
-}
-
 interface FlipbookProps {
   searchResult: CompetitorSearchResult;
   onBackToSearch: () => void;
@@ -156,28 +51,6 @@ export const Flipbook: React.FC<FlipbookProps> = ({
   const [direction, setDirection] = useState<1 | -1>(1);
   const [showIndexMenu, setShowIndexMenu] = useState(false);
   const [mobileTab, setMobileTab] = useState<'dossier' | 'pricing'>('dossier');
-  const [copiedSummary, setCopiedSummary] = useState(false);
-  const [copiedField, setCopiedField] = useState<'' | 'ok' | 'empty'>('');
-
-  const handleCopyField = () => {
-    const text = buildFieldText(searchResult);
-    if (!text) {
-      setCopiedField('empty');
-    } else {
-      navigator.clipboard.writeText(text).catch(() => window.prompt('Copy this for the Competitor Prices column:', text));
-      setCopiedField('ok');
-    }
-    setTimeout(() => setCopiedField(''), 2500);
-  };
-
-  const handleCopySummary = () => {
-    const text = buildEmailSummary(searchResult);
-    navigator.clipboard.writeText(text).catch(() => {
-      window.prompt('Copy this text for your email:', text);
-    });
-    setCopiedSummary(true);
-    setTimeout(() => setCopiedSummary(false), 2000);
-  };
 
   const total = competitors.length;
   const currentCompetitor: CompetitorBusiness | undefined = competitors[currentIndex];
@@ -373,33 +246,6 @@ export const Flipbook: React.FC<FlipbookProps> = ({
               </div>
             )}
           </div>
-
-          <button
-            onClick={handleCopySummary}
-            className="px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-700 hover:border-amber-500/50 text-slate-300 hover:text-amber-300 flex items-center gap-1.5 transition-all text-xs font-medium"
-            title="Copy a short price summary to paste into an email"
-          >
-            {copiedSummary ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
-            <span>{copiedSummary ? 'Copied!' : 'Copy for email'}</span>
-          </button>
-
-          <button
-            onClick={handleCopyField}
-            className="px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-700 hover:border-amber-500/50 text-slate-300 hover:text-amber-300 flex items-center gap-1.5 transition-all text-xs font-medium"
-            title="Copy a one-line price list for the Saleshandy 'Competitor Prices' column"
-          >
-            {copiedField === 'ok' ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
-            <span>{copiedField === 'ok' ? 'Copied!' : copiedField === 'empty' ? 'No prices: leave blank' : 'Copy for Saleshandy'}</span>
-          </button>
-
-          <button
-            onClick={() => printReport(searchResult)}
-            className="px-3 py-1.5 rounded-lg bg-amber-500/90 hover:bg-amber-400 text-slate-950 flex items-center gap-1.5 transition-all text-xs font-semibold"
-            title="Open the full report so you can save it as a PDF"
-          >
-            <Download className="w-3.5 h-3.5" />
-            <span>Download PDF</span>
-          </button>
 
           <button
             onClick={onOpenShare}

@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import express, { Request, Response, NextFunction } from 'express';
 import dotenv from 'dotenv';
 import path from 'path';
@@ -20,63 +21,56 @@ app.use(express.json({ limit: '1mb' }));
 const inFlightSearches = new Map<string, Promise<CompetitorSearchResult>>();
 const searchCache = new Map<string, { data: CompetitorSearchResult; expiresAt: number }>();
 
-// Authorized credentials for Cloud Run deployment
-const OWNER_EMAIL = 'halvmorgan@gmail.com';
-const DEFAULT_ACCESS_PASS = 'PRO-COMPETE-2026';
-const authorizedEmails = new Set<string>([OWNER_EMAIL]);
-const authorizedPasscodes = new Set<string>([DEFAULT_ACCESS_PASS, 'MARKET-LEADER', 'PRICING-INTEL']);
+// Access control: ONE team passcode, stored only in the AI Studio secret APP_ACCESS_PASSCODE.
+// No passcode is written in the code. If the secret is not set, nobody can get in (fails closed).
+const ACCESS_PASSCODE = (process.env.APP_ACCESS_PASSCODE || '').trim();
 
-// Auth verification endpoint
+function passcodeMatches(candidate: unknown): boolean {
+  if (!ACCESS_PASSCODE || typeof candidate !== 'string' || !candidate.trim()) return false;
+  const a = crypto.createHash('sha256').update(candidate.trim()).digest();
+  const b = crypto.createHash('sha256').update(ACCESS_PASSCODE).digest();
+  return crypto.timingSafeEqual(a, b);
+}
+
+// Simple brute-force protection: max 10 sign-in attempts per IP per 15 minutes
+const authAttempts = new Map<string, { count: number; resetAt: number }>();
+function tooManyAttempts(ip: string): boolean {
+  const now = Date.now();
+  const entry = authAttempts.get(ip);
+  if (!entry || entry.resetAt < now) {
+    authAttempts.set(ip, { count: 1, resetAt: now + 15 * 60 * 1000 });
+    return false;
+  }
+  entry.count += 1;
+  return entry.count > 10;
+}
+
+// Auth verification endpoint (passcode required; email is only a display label)
 app.post('/api/auth/verify', (req: Request, res: Response) => {
+  const ip = (req.headers['x-forwarded-for'] as string | undefined)?.split(',')[0]?.trim() || req.ip || 'unknown';
+  if (tooManyAttempts(ip)) {
+    return res.json({ authorized: false, message: 'Too many attempts. Please wait 15 minutes and try again.' });
+  }
+  if (!ACCESS_PASSCODE) {
+    return res.json({ authorized: false, message: 'Access is not set up yet. The owner needs to add the APP_ACCESS_PASSCODE secret.' });
+  }
   const { email, accessPass } = req.body || {};
-
-  const cleanEmail = (email || '').trim().toLowerCase();
-  const cleanPass = (accessPass || '').trim();
-
-  if (cleanEmail && (authorizedEmails.has(cleanEmail) || cleanEmail === OWNER_EMAIL)) {
-    return res.json({
-      authorized: true,
-      user: {
-        email: cleanEmail,
-        role: cleanEmail === OWNER_EMAIL ? 'owner' : 'team',
-        authenticatedAt: new Date().toISOString(),
-      },
-    });
+  if (!passcodeMatches(accessPass)) {
+    return res.json({ authorized: false, message: 'Incorrect passcode.' });
   }
-
-  if (cleanPass && authorizedPasscodes.has(cleanPass)) {
-    return res.json({
-      authorized: true,
-      user: {
-        email: cleanEmail || 'Shared Access User',
-        role: 'guest',
-        authenticatedAt: new Date().toISOString(),
-      },
-    });
-  }
-
-  return res.status(401).json({
-    authorized: false,
-    message: 'Invalid credentials. Enter authorized email or team access passcode.',
+  const label = typeof email === 'string' && email.trim() ? email.trim().slice(0, 120) : 'Team Member';
+  return res.json({
+    authorized: true,
+    user: { email: label, role: 'team', authenticatedAt: new Date().toISOString() },
   });
 });
 
-// Middleware to ensure user is authenticated
+// Middleware: every search must carry the passcode in the x-access-key header
 function requireAuth(req: Request, res: Response, next: NextFunction) {
-  const authHeader = req.headers['authorization'] || '';
-  const accessKeyHeader = req.headers['x-access-key'] as string | undefined;
-  const queryKey = req.query.access_key as string | undefined;
-
-  const token = (typeof authHeader === 'string' ? authHeader : '').replace(/^Bearer\s+/i, '').trim();
-  const pass = accessKeyHeader || queryKey || token;
-
-  const isOwner = token === OWNER_EMAIL || authorizedEmails.has(token);
-  const isPassValid = authorizedPasscodes.has(pass);
-
-  if (isOwner || isPassValid || process.env.DISABLE_AUTH === 'true') {
+  const pass = req.headers['x-access-key'];
+  if (passcodeMatches(pass) || process.env.DISABLE_AUTH === 'true') {
     return next();
   }
-
   return res.status(401).json({
     error: 'Authentication required to access Competitive Pricing Offer Analysis.',
   });
@@ -153,7 +147,6 @@ async function checkWebsiteLoads(urlStr: string, timeoutMs = 5000): Promise<bool
 
 // Google Maps Platform API key for Places API
 const GOOGLE_MAPS_API_KEY = process.env.GOOGLE_MAPS_API_KEY || '';
-if (!GOOGLE_MAPS_API_KEY) console.error('[SERVER] GOOGLE_MAPS_API_KEY secret is not set.');
 
 // Haversine distance calculator in miles
 function getDistanceMiles(lat1: number, lon1: number, lat2: number, lon2: number): number {
@@ -390,89 +383,50 @@ async function fetchBusinessSiteContent(websiteUri: string): Promise<FetchedSite
       .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, ' ')
       .replace(/<[^>]+>/g, ' ')
       .replace(/\s+/g, ' ')
-      .slice(0, 60000);
+      .slice(0, 10000);
 
     // Look for /pricing, /services, /rates, /packages, /menu, /memberships, /classes, /cost links
     const hrefMatches = [...homeHtml.matchAll(/href=["']([^"']+)["']/gi)].map((m) => m[1]);
-    const isAsset = (h: string) => /\.(css|js|png|jpe?g|gif|svg|webp|ico|pdf)(\?|$)/i.test(h) || h.startsWith('#') || h.startsWith('mailto:') || h.startsWith('tel:');
-    const pricingMatch =
-      hrefMatches.find((h) => !isAsset(h) && /(pricing|prices|price-list|menu|rates|cost)/i.test(h)) ||
-      hrefMatches.find((h) => !isAsset(h) && /(services|packages|memberships|classes)/i.test(h));
+    const pricingMatch = hrefMatches.find((h) =>
+      /(pricing|rates|services|packages|memberships|classes|cost|rates-and-packages)/i.test(h)
+    );
 
-    const UA_HEADERS = {
-      'User-Agent':
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-      Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-    };
-    const baseHost = new URL(websiteUri).hostname.replace(/^www\./, '');
-    const toText = (html: string) =>
-      html
-        .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, ' ')
-        .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, ' ')
-        .replace(/<[^>]+>/g, ' ')
-        .replace(/\s+/g, ' ')
-        .slice(0, 60000);
-
-    // Candidate pricing pages: links found on the home page first, then common paths
-    const candidates: string[] = [];
-    const addCandidate = (href: string) => {
+    if (pricingMatch) {
       try {
-        const u = href.startsWith('http') ? href : new URL(href, websiteUri).toString();
-        const h = new URL(u).hostname.replace(/^www\./, '');
-        if ((h === baseHost || h.endsWith('.' + baseHost)) && !candidates.includes(u)) candidates.push(u);
-      } catch {}
-    };
-    if (pricingMatch) addCandidate(pricingMatch);
-    for (const p of ['/pricing', '/prices', '/services', '/our-services', '/menu', '/service-menu', '/rates']) addCandidate(p);
+        const subUrl = pricingMatch.startsWith('http')
+          ? pricingMatch
+          : new URL(pricingMatch, websiteUri).toString();
 
-    let fallbackText = '';
-    let fallbackUrl = '';
-    for (const subUrl of candidates.slice(0, 6)) {
-      try {
-        const subRes = await fetch(subUrl, { headers: UA_HEADERS, signal: AbortSignal.timeout(5000), redirect: 'follow' });
-        if (!subRes.ok) continue;
-        const text = toText(await subRes.text());
-        if (/\$\s?\d/.test(text)) {
-          result.subpageText = text;
-          result.subpageUrl = subUrl;
-          break;
-        }
-        if (!fallbackText && text.length > 200) {
-          fallbackText = text;
-          fallbackUrl = subUrl;
+        const baseHost = new URL(websiteUri).hostname.replace(/^www\./, '');
+        const subHost = new URL(subUrl).hostname.replace(/^www\./, '');
+
+        if (subHost === baseHost || subHost.endsWith('.' + baseHost)) {
+          const subRes = await fetch(subUrl, {
+            headers: {
+              'User-Agent':
+                'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+              Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            },
+            signal: AbortSignal.timeout(5000),
+            redirect: 'follow',
+          });
+
+          if (subRes.ok) {
+            const subHtml = await subRes.text();
+            result.subpageText = subHtml
+              .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, ' ')
+              .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, ' ')
+              .replace(/<[^>]+>/g, ' ')
+              .replace(/\s+/g, ' ')
+              .slice(0, 12000);
+            result.subpageUrl = subUrl;
+          }
         }
       } catch {}
-    }
-    if (!result.subpageUrl && fallbackText) {
-      result.subpageText = fallbackText;
-      result.subpageUrl = fallbackUrl;
     }
   } catch {}
 
   return result;
-}
-
-// Keep the parts of a page that contain prices so they fit in the prompt
-function focusOnPrices(text: string, maxChars: number): string {
-  if (!text || text.length <= maxChars) return text || '';
-  const re = /\$\s?\d/g;
-  const windows: Array<[number, number]> = [];
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(text)) !== null) {
-    const start = Math.max(0, m.index - 250);
-    const end = Math.min(text.length, m.index + 150);
-    const last = windows[windows.length - 1];
-    if (last && start <= last[1]) last[1] = end;
-    else windows.push([start, end]);
-  }
-  if (windows.length === 0) return text.slice(0, maxChars);
-  let out = '';
-  for (const [a, b] of windows) {
-    const piece = text.slice(a, b);
-    if (out.length + piece.length + 5 > maxChars) break;
-    out += piece + ' ... ';
-  }
-  return out;
 }
 
 // Requirement 3: Ask Gemini to pull offers ONLY from fetched text.
@@ -482,27 +436,24 @@ async function extractGroundedOffers(
   businessName: string,
   websiteUri: string,
   content: FetchedSiteContent
-): Promise<{ offers: PublishedOffer[]; failed: boolean }> {
+): Promise<PublishedOffer[]> {
   const verifiedOffers: PublishedOffer[] = [];
-  let extractionFailed = false;
   const combinedPageText = `${content.homeText} ${content.subpageText}`.trim();
-  if (!combinedPageText) return { offers: [], failed: false };
+  if (!combinedPageText) return [];
 
   // 1. Try Gemini model extraction
   try {
     const prompt = `You are a precision pricing analyst.
 Read the following official webpage text fetched directly from the business website (${businessName} - ${websiteUri}):
 
-${content.subpageUrl ? `PRICING SUBPAGE (${content.subpageUrl}):\n${focusOnPrices(content.subpageText, 7000)}\n\n` : ''}
+${content.subpageUrl ? `PRICING SUBPAGE (${content.subpageUrl}):\n${content.subpageText.slice(0, 9000)}\n\n` : ''}
 HOMEPAGE CONTENT:
-${focusOnPrices(content.homeText, 5000)}
+${content.homeText.slice(0, 7000)}
 
 Extract any published pricing offers, packages, memberships, single session rates, or introductory specials explicitly listed in the text above.
 
 CRITICAL RULES:
-1. ONLY extract an offer if its exact price text (e.g. $45, $150, $25) appears explicitly in the text above, written by the business itself.
-1b. IGNORE prices mentioned in customer reviews, testimonials, or comments (e.g. "I paid about $200").
-1c. If the amount is a discount (e.g. "$200 off your first visit"), set price to "$200 off" and keep the full offer wording in the title.
+1. ONLY extract an offer if its exact price text (e.g. $45, $150, $25) appears explicitly in the text above.
 2. DO NOT estimate, assume, or fabricate any price.
 3. If no pricing appears in the text above, return strictly an empty array: []
 4. Return strictly a JSON array with this structure:
@@ -518,33 +469,18 @@ CRITICAL RULES:
 ]`;
 
     let rawJson = '';
-    let gotResponse = false;
-    const backoffMs = [5000, 15000, 30000];
-    for (const m of ['gemini-3.1-flash-lite', 'gemini-3.5-flash']) {
-      for (let attempt = 0; attempt <= backoffMs.length; attempt++) {
-        try {
-          const res = await ai.models.generateContent({
-            model: m,
-            contents: prompt,
-            config: { responseMimeType: 'application/json' },
-          });
-          rawJson = res.text || '';
-          gotResponse = true;
-          break;
-        } catch (e: any) {
-          const status = e?.status || e?.code || '';
-          const msg = String(e?.message || '');
-          const retryable = status === 429 || status === 503 || /429|503|RESOURCE_EXHAUSTED|UNAVAILABLE|overloaded/i.test(msg);
-          console.log(`[SERVER] Gemini offer extraction on ${m} attempt ${attempt + 1} notice:`, status || msg);
-          if (!retryable || attempt === backoffMs.length) break;
-          await new Promise((r) => setTimeout(r, backoffMs[attempt]));
-        }
+    for (const m of ['gemini-3.5-flash', 'gemini-3.1-flash-lite', 'gemini-flash-latest']) {
+      try {
+        const res = await ai.models.generateContent({
+          model: m,
+          contents: prompt,
+          config: { responseMimeType: 'application/json' },
+        });
+        rawJson = res.text || '';
+        if (rawJson) break;
+      } catch (e: any) {
+        console.log(`[SERVER] Gemini offer extraction on ${m} notice:`, e.status || e.message);
       }
-      if (gotResponse) break;
-    }
-    if (!gotResponse) {
-      extractionFailed = true;
-      console.log(`[SERVER] Pricing could not be checked for ${businessName} (Gemini unavailable after retries).`);
     }
 
     if (rawJson) {
@@ -555,32 +491,21 @@ CRITICAL RULES:
           if (!item.title || !item.price) continue;
 
           const priceStr = String(item.price).trim();
+          const rawNum = priceStr.replace(/[^0-9.]/g, '');
 
-          // Strict verification: the dollar amount (with the $ sign) must appear on the fetched page,
-          // must not sit inside a customer review, and we keep the surrounding text as proof.
-          const dollarMatch = priceStr.match(/\$\s?\d[\d,]*(?:\.\d{1,2})?/);
-          if (!dollarMatch) continue;
-          const amount = dollarMatch[0].replace(/\s/g, '');
-          const amountRe = new RegExp('\\$\\s?' + amount.slice(1).replace(/[.,]/g, (c) => '\\' + c) + '(?![\\d])');
-          const hitSub = content.subpageText ? amountRe.exec(content.subpageText) : null;
-          const hitHome = !hitSub ? amountRe.exec(content.homeText) : null;
-          const hit = hitSub || hitHome;
-          if (!hit) continue;
-          const hitText = hitSub ? content.subpageText : content.homeText;
-          const evidence = hitText.slice(Math.max(0, hit.index - 160), hit.index + hit[0].length + 60).trim();
-          const before = hitText.slice(Math.max(0, hit.index - 160), hit.index);
-          if (/(review|testimonial|stars?\b|★|rated|i paid|we paid|paid (?:about|around|only)|charged (?:me|us)|quoted (?:me|us)|google|yelp)/i.test(before)) continue;
-          const after = hitText.slice(hit.index + hit[0].length, hit.index + hit[0].length + 6);
-          const isDiscount = /^\s*off\b/i.test(after);
-          const finalPrice = isDiscount && !/off/i.test(priceStr) ? amount + ' off' : priceStr;
+          // Strict verification: Keep offer ONLY if exact price text appears on the page
+          const inCombined = combinedPageText.includes(priceStr) || (rawNum && combinedPageText.includes(rawNum));
+          if (!inCombined) continue;
 
-          const sourceUrl = hitSub && content.subpageUrl ? content.subpageUrl : websiteUri;
+          const sourceUrl =
+            item.sourcePage === 'subpage' && content.subpageUrl
+              ? content.subpageUrl
+              : content.subpageUrl || websiteUri;
 
           verifiedOffers.push({
             id: `offer_${Date.now()}_${i}`,
             title: String(item.title).trim(),
-            price: finalPrice,
-            evidence,
+            price: priceStr,
             currency: String(item.currency || '$').trim(),
             billingPeriod: String(item.billingPeriod || 'as published').trim(),
             introRestrictions: item.introRestrictions ? String(item.introRestrictions).trim() : undefined,
@@ -639,7 +564,7 @@ CRITICAL RULES:
     }
   }
 
-  return { offers: verifiedOffers, failed: extractionFailed && verifiedOffers.length === 0 };
+  return verifiedOffers;
 }
 
 // Helpers for robust JSON extraction
@@ -822,9 +747,8 @@ app.post('/api/search', requireAuth, async (req: Request, res: Response) => {
       // Keep an offer only if the exact price text appears on the page; save the page URL as the source.
       console.log(`[SERVER] Step 2: Fetching website pages and extracting grounded pricing offers...`);
       const sanitizedCompetitors: CompetitorBusiness[] = [];
-      let extractionErrors = 0;
 
-      const batchSize = 1; // one business at a time to stay under Gemini rate limits
+      const batchSize = 3;
       for (let i = 0; i < placesCandidates.length && sanitizedCompetitors.length < 10; i += batchSize) {
         const batch = placesCandidates.slice(i, i + batchSize);
         const batchResults = await Promise.all(
@@ -833,9 +757,7 @@ app.post('/api/search', requireAuth, async (req: Request, res: Response) => {
             console.log(`[SERVER] [${idx + 1}/${placesCandidates.length}] Inspecting ${place.name} (${place.websiteUri})...`);
 
             const siteContent = await fetchBusinessSiteContent(place.websiteUri);
-            const extraction = await extractGroundedOffers(ai, place.name, place.websiteUri, siteContent);
-            const verifiedOffers = extraction.offers;
-            if (extraction.failed) extractionErrors++;
+            const verifiedOffers = await extractGroundedOffers(ai, place.name, place.websiteUri, siteContent);
 
             const hasPublishedPricing = verifiedOffers.length > 0;
             const distStr = place.distanceMiles < 0.2 ? 'Within 0.2 mi' : `${place.distanceMiles.toFixed(1)} mi`;
@@ -863,11 +785,7 @@ app.post('/api/search', requireAuth, async (req: Request, res: Response) => {
               description: `Verified local ${cleanIndustry} provider operating at ${place.formattedAddress}.`,
               specialties: [cleanIndustry, 'Local Service', 'Customer Care'],
               hasPublishedPricing,
-              noPricingReason: hasPublishedPricing
-                ? undefined
-                : extraction.failed
-                ? 'Pricing could not be checked'
-                : 'Price not published',
+              noPricingReason: hasPublishedPricing ? undefined : 'Price not published',
               offers: verifiedOffers,
               groundingSources: compGroundingSources,
             };
@@ -878,11 +796,6 @@ app.post('/api/search', requireAuth, async (req: Request, res: Response) => {
           if (sanitizedCompetitors.length < 10) {
             sanitizedCompetitors.push(comp);
           }
-        }
-
-        // Pause 2 seconds between businesses
-        if (sanitizedCompetitors.length < 10 && i + batchSize < placesCandidates.length) {
-          await new Promise((r) => setTimeout(r, 2000));
         }
       }
 
@@ -907,9 +820,7 @@ app.post('/api/search', requireAuth, async (req: Request, res: Response) => {
       }
 
       // Requirement 4: Only cache a result for 24 hours, keyed on industry + location + radius
-      if (extractionErrors > 0) {
-        console.log(`[SERVER] Not caching: ${extractionErrors} business(es) had pricing extraction errors.`);
-      } else if (sanitizedCompetitors.length >= 5) {
+      if (sanitizedCompetitors.length >= 5) {
         const CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
         searchCache.set(cacheKey, {
           data: result,

@@ -99,9 +99,6 @@ export default function App() {
       'Content-Type': 'application/json',
     };
 
-    if (authSession?.email) {
-      headers['Authorization'] = `Bearer ${authSession.email}`;
-    }
     if (authSession?.accessPass) {
       headers['x-access-key'] = authSession.accessPass;
     }
@@ -115,6 +112,12 @@ export default function App() {
       });
 
       const data = await response.json();
+
+      if (response.status === 401) {
+        // Saved sign-in is no longer valid (passcode changed): send the user back to the sign-in screen
+        handleSignOut();
+        return;
+      }
 
       if (!response.ok) {
         throw new Error(data.error || 'Failed to search competitors.');
