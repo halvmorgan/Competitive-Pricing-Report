@@ -1,0 +1,41 @@
+@import "tailwindcss";
+
+@layer utilities {
+  .font-serif-heading {
+    font-family: 'Newsreader', Georgia, serif;
+  }
+  .font-display {
+    font-family: 'Cinzel', Georgia, serif;
+  }
+  .font-sans-ui {
+    font-family: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+  }
+  .perspective-1000 {
+    perspective: 1000px;
+  }
+  .perspective-1400 {
+    perspective: 1400px;
+  }
+  .transform-style-preserve-3d {
+    transform-style: preserve-3d;
+  }
+  .backface-hidden {
+    backface-visibility: hidden;
+  }
+}
+
+/* Custom scrollbars for clean paper texture feel */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: rgba(0, 0, 0, 0.05);
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(140, 101, 36, 0.25);
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(140, 101, 36, 0.45);
+}

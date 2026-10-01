@@ -1,0 +1,6 @@
+{
+  "name": "Competitive Pricing Offer Analysis",
+  "description": "Research local competitors, publicly listed prices, and offers presented in an interactive flipbook.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
