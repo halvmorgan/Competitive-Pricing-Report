@@ -7,6 +7,7 @@ export interface PublishedOffer {
   introRestrictions?: string;
   extraFees?: string;
   sourceUrl: string;
+  evidence?: string; // exact page text around the price, kept as proof
 }
 
 export interface GroundingSource {

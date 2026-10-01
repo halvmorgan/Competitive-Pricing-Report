@@ -17,39 +17,9 @@ export default function App() {
   // In-flight abort controller for duplicate request protection
   const abortControllerRef = useRef<AbortController | null>(null);
 
-  // Initialize auth from URL param (?access_key=...) or localStorage
+  // Initialize auth from localStorage (passcode is never read from the URL)
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const accessKey = params.get('access_key');
-
     const checkInitialAuth = async () => {
-      // 1. If access key in URL
-      if (accessKey) {
-        try {
-          const res = await fetch('/api/auth/verify', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ accessPass: accessKey }),
-          });
-          const data = await res.json();
-          if (res.ok && data.authorized) {
-            const session: AuthSession = {
-              isAuthenticated: true,
-              email: data.user.email,
-              accessPass: accessKey,
-              role: data.user.role || 'guest',
-              authenticatedAt: new Date().toISOString(),
-            };
-            localStorage.setItem('competitor_intel_auth', JSON.stringify(session));
-            setAuthSession(session);
-            setIsVerifyingAuth(false);
-            return;
-          }
-        } catch (e) {
-          console.warn('URL auth verification error:', e);
-        }
-      }
-
       // 2. Check localStorage
       try {
         const stored = localStorage.getItem('competitor_intel_auth');
@@ -111,13 +81,13 @@ export default function App() {
         signal: controller.signal,
       });
 
-      const data = await response.json();
-
       if (response.status === 401) {
-        // Saved sign-in is no longer valid (passcode changed): send the user back to the sign-in screen
+        // Passcode no longer valid (changed or expired): sign out so the user can sign in again
         handleSignOut();
         return;
       }
+
+      const data = await response.json();
 
       if (!response.ok) {
         throw new Error(data.error || 'Failed to search competitors.');

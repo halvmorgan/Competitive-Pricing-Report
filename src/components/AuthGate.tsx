@@ -25,22 +25,22 @@ export const AuthGate: React.FC<AuthGateProps> = ({ onAuthenticated }) => {
       });
 
       const data = await res.json();
-      if (!res.ok || !data.authorized) {
-        throw new Error(data.message || 'Invalid email or access passcode.');
+      if (!data.authorized) {
+        throw new Error(data.message || 'Incorrect passcode.');
       }
 
       const session: AuthSession = {
         isAuthenticated: true,
         email: data.user.email,
-        accessPass: accessPass || undefined,
-        role: data.user.role || 'guest',
+        accessPass: accessPass,
+        role: data.user.role || 'team',
         authenticatedAt: data.user.authenticatedAt || new Date().toISOString(),
       };
 
       localStorage.setItem('competitor_intel_auth', JSON.stringify(session));
       onAuthenticated(session);
     } catch (err: any) {
-      setError(err?.message || 'Authentication failed. Please check your credentials.');
+      setError(err?.message || 'Sign-in failed. Please check the passcode.');
     } finally {
       setLoading(false);
     }
@@ -48,7 +48,6 @@ export const AuthGate: React.FC<AuthGateProps> = ({ onAuthenticated }) => {
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-slate-950 via-slate-900 to-slate-950 text-slate-100 flex flex-col justify-center items-center px-4 py-12 relative overflow-hidden">
-      {/* Subtle background glow */}
       <div className="absolute top-1/4 left-1/2 -translate-x-1/2 w-96 h-96 bg-amber-500/10 rounded-full blur-3xl pointer-events-none" />
 
       <div className="w-full max-w-md bg-slate-900/90 border border-slate-800/80 rounded-2xl p-8 backdrop-blur-xl shadow-2xl relative z-10">
@@ -59,9 +58,7 @@ export const AuthGate: React.FC<AuthGateProps> = ({ onAuthenticated }) => {
           <h1 className="text-2xl font-serif-heading font-semibold text-slate-100 tracking-tight">
             Competitive Pricing Analysis
           </h1>
-          <p className="text-xs text-slate-400 mt-2">
-            Private team tool · Ecentra Concierge
-          </p>
+          <p className="text-xs text-slate-400 mt-2">Private team tool · Ecentra Concierge</p>
         </div>
 
         {error && (
@@ -73,9 +70,7 @@ export const AuthGate: React.FC<AuthGateProps> = ({ onAuthenticated }) => {
 
         <form onSubmit={handleVerify} className="space-y-4">
           <div>
-            <label className="block text-xs font-medium text-slate-300 mb-1.5">
-              Your name or email (optional)
-            </label>
+            <label className="block text-xs font-medium text-slate-300 mb-1.5">Your name or email (optional)</label>
             <input
               type="text"
               value={email}
@@ -86,18 +81,15 @@ export const AuthGate: React.FC<AuthGateProps> = ({ onAuthenticated }) => {
           </div>
 
           <div>
-            <div className="flex items-center justify-between mb-1.5">
-              <label className="block text-xs font-medium text-slate-300">
-                Access Passcode
-              </label>
-            </div>
+            <label className="block text-xs font-medium text-slate-300 mb-1.5">Access Passcode</label>
             <div className="relative">
               <input
                 type="password"
-                autoComplete="current-password"
                 value={accessPass}
                 onChange={(e) => setAccessPass(e.target.value)}
                 placeholder="Enter your passcode"
+                autoComplete="current-password"
+                required
                 className="w-full pl-9 pr-3.5 py-2.5 bg-slate-950/60 border border-slate-700 rounded-lg text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-amber-500/50 focus:border-amber-500 font-mono transition-all"
               />
               <Key className="w-4 h-4 text-slate-500 absolute left-3 top-3" />
@@ -120,9 +112,7 @@ export const AuthGate: React.FC<AuthGateProps> = ({ onAuthenticated }) => {
           </button>
         </form>
 
-        <p className="mt-8 pt-6 border-t border-slate-800/80 text-[11px] text-slate-500 text-center">
-          Need access? Contact Ecentra Concierge for a passcode.
-        </p>
+        <p className="text-[11px] text-slate-500 mt-8 text-center">Need access? Contact Ecentra Concierge for a passcode.</p>
       </div>
     </div>
   );
